@@ -1,3 +1,3 @@
-pub async fn run() -> crate::Result<()> {
+pub async fn run(_opt: crate::ServerOpt) -> crate::Result<()> {
     Ok(())
 }
