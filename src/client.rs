@@ -6,6 +6,7 @@ use crate::StructOpt;
 pub struct ClientOpt {}
 
 // Весь код, связанный с запуском клиента, пишем тут:
-pub async fn run(_opt: ClientOpt) -> crate::Result<()> {
+pub async fn run(opt: ClientOpt) -> crate::Result<()> {
+    dbg!(opt);
     Ok(())
 }

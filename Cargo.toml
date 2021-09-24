@@ -14,8 +14,13 @@ structopt = "0.3"
 # для бобее компактного кода и быстрой компиляции:
 tokio = { version = "1.12", features = ["rt-multi-thread", "net", "signal", "macros"] }
 
+# Я отказался от этого crate. Он удобен, но недостаточно гибок для поставленной задачи(
 # Большая часть кода Client/Server реалезована в ctare hyper. Попробуем его использовать:
-hyper = {version = "0.14", features = ["http2", "client","server", "runtime"]}
+# hyper = {version = "0.14", features = ["http2", "client","server", "runtime"]}
+
+# Буду использовать h2. Этот crate позволить более точно контролировать подключение клиентов к серверу,
+# позволит почень просто реалезовать http/2 multiplexing:
+h2 = "0.3.4"
 
 # Для работы с Error добавим crate anyhow:
 anyhow = "1.0"
