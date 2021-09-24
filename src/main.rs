@@ -8,6 +8,9 @@ enum Opt {
     Server {},
     Client {},
 }
-fn main() {
+
+// Оприделим функцию main с использованиям макроса #[toki::main], main добжна быть async:
+#[tokio::main]
+async fn main() {
     dbg!(Opt::from_args());
 }
