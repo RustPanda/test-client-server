@@ -1,0 +1,12 @@
+[package]
+name = "test-client-server"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# Не хочу писать два отдельных приложения. Одно приложение может запутиться в роли Servr или Client,
+# в этом наи поможет crate:
+structopt = "0.3"
+
