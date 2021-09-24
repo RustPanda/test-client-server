@@ -9,16 +9,9 @@ use {anyhow::Result, structopt::StructOpt, tokio};
 #[derive(Debug, StructOpt)]
 #[structopt(about = "Тестовое Client/Server приложение")]
 enum Opt {
-    Server(ServerOpt),
-    Client(ClientOpt),
+    Server(server::ServerOpt),
+    Client(client::ClientOpt),
 }
-
-// Для удобства передачи cfg клиента и сервера определим две структуры:
-#[derive(Debug, StructOpt)]
-pub struct ServerOpt {}
-
-#[derive(Debug, StructOpt)]
-pub struct ClientOpt {}
 
 // Оприделим функцию main с использованиям макроса #[toki::main], main добжна быть async:
 #[tokio::main]
