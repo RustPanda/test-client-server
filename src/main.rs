@@ -3,7 +3,7 @@ mod client;
 mod server;
 
 // Объявим crates, которые я буду использовать в этом тэстовом приложении:
-use {anyhow::Result, structopt::StructOpt, tokio};
+use {anyhow::Result, structopt::StructOpt};
 
 // Определим структуру с trait StructOpt, она поможет нам понять с какой ролью мы запустили наше приложение:
 #[derive(Debug, StructOpt)]
