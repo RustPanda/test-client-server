@@ -12,7 +12,7 @@ structopt = "0.3"
 
 # Для ассинхронного выполнения кода добавим Tokio. Я беде истользовать только необходимые futures
 # для бобее компактного кода и быстрой компиляции:
-tokio = { version = "1.12", features = ["rt-multi-thread", "net", "signal", "macros"] }
+tokio = { version = "1.12", features = ["rt-multi-thread", "net", "signal", "macros", "sync"] }
 
 # Я отказался от этого crate. Он удобен, но недостаточно гибок для поставленной задачи(
 # Большая часть кода Client/Server реалезована в ctare hyper. Попробуем его использовать:
@@ -20,7 +20,9 @@ tokio = { version = "1.12", features = ["rt-multi-thread", "net", "signal", "mac
 
 # Буду использовать h2. Этот crate позволить более точно контролировать подключение клиентов к серверу,
 # позволит почень просто реалезовать http/2 multiplexing:
-h2 = "0.3.4"
+h2 = {version = "0.3.4"}
 
 # Для работы с Error добавим crate anyhow:
 anyhow = "1.0"
+
+http = "*"
