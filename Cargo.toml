@@ -12,7 +12,7 @@ structopt = "0.3"
 
 # Для ассинхронного выполнения кода добавим Tokio. Я беде истользовать только необходимые futures
 # для бобее компактного кода и быстрой компиляции:
-tokio = { version = "1.12", features = ["rt-multi-thread", "net", "signal", "macros", "sync", "time"] }
+tokio = { version = "1.12", features = ["rt-multi-thread", "net", "signal", "macros", "sync", "time",] }
 
 # Я отказался от этого crate. Он удобен, но недостаточно гибок для поставленной задачи(
 # Большая часть кода Client/Server реалезована в ctare hyper. Попробуем его использовать:
