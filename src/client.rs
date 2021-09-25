@@ -8,5 +8,6 @@ pub struct ClientOpt {}
 // Весь код, связанный с запуском клиента, пишем тут:
 pub async fn run(opt: ClientOpt) -> crate::Result<()> {
     dbg!(opt);
+    println!("Клиентская чать приложения еще не готова!");
     Ok(())
 }

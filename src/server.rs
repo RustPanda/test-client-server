@@ -67,7 +67,8 @@ pub async fn run(opt: ServerOpt) -> crate::Result<()> {
                     res = semaphore.clone().acquire_owned() => {
                         match res {
                             Ok(_) => {
-                                println!("Все соединения с клиентами завершены!");
+                                println!("\nВсе соединения с клиентами завершены!");
+                                break
                             },
                             Err(err) => {
                                 eprint!("Не удалось завершить соединения с клиентами. \nError: {}", err);
@@ -89,10 +90,10 @@ async fn connect_handler(
     stream: TcpStream,
     addr: SocketAddr,
     semaphore_permit: OwnedSemaphorePermit,
-    clone_stop_notify: Arc<Notify>,
+    stop_notify: Arc<Notify>,
 ) {
-    // Зарегистрируем обработчик в Notify. Вызвав await смодет получить разрешение на завершение работы:
-    let notifaid = clone_stop_notify.notified();
+    // Зарегистрируем обработчик в Notify. Вызвав await сможем получить разрешение на завершение работы:
+    let notifaid = stop_notify.notified();
 
     // Создаем генератор псевдослучайных чисел:
     let mut rng: StdRng = SeedableRng::from_entropy();
@@ -108,10 +109,10 @@ async fn connect_handler(
     // Нагрузка на сервер иметируется sleep, но от у меня async. Во время сна мы блокируеи поток:
     tokio::select! {
         _ = notifaid => {
-            // Мы получили сигнал о завершении работы, нам надо бообщить об этом клиентам. Для этого в h2 есть:
+            // Мы получили сигнал о завершении работы, нам надо сообщить об этом клиентам, для этого в h2 есть:
             h2.graceful_shutdown();
         }
-        // Вот и наше не совсем паралельное http/2 multeplexing, но для этого проэка будет достаточно:
+        // Вот и наше не совсем паралельное http/2 multeplexing, но для нашего проека будет достаточно:
         request = h2.accept() => {
             if let Some(request)= request {
                 // Здесь обрабатываем поступившие запросы от клиента:
@@ -119,7 +120,7 @@ async fn connect_handler(
                 println!("Получено сообщение: {:?}", request);
                 // Остановим обработку запроса на рандомное время 100-500 мс:
 
-                // Иметируем работу сервера. Я не уверен в правильной работе генератора случайных чисел, надо проверять:
+                // Имитируем работу сервера. Я не уверен в правильной работе генератора случайных чисел, надо проверять:
                 let time = Duration::from_millis(rng.gen_range(100..=500));
                 println!("Sleep {} ms", time.as_millis());
 
