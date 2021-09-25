@@ -29,19 +29,24 @@ pub async fn run(opt: ServerOpt) -> crate::Result<()> {
     let semaphore = Arc::new(Semaphore::new(opt.connect_limmit));
 
     loop {
-        // Ждем подключение клиента:
-        let (stream, addr) = listener.accept().await?;
+        tokio::select! {
+            conn = listener.accept() => {
+                // Разверням наш conn:
+                let (stream: TcpStream, addr: SocketAddr) = conn?;
 
-        // Получаем разрешение от нашего semaphore:
-        let permit = semaphore.clone().acquire_owned().await?;
+                // Получаем разрешение от нашего semaphore:
+                let permit = semaphore.clone().acquire_owned().await?;
 
-        // Посмотрим кто к нам подключился:
-        dbg!(addr.to_string());
+                // Посмотрим кто к нам подключился:
+                dbg!(addr.to_string());
 
-        // Протокол http/2 позволяет отправлять много html запросов. Наверное лучше обработаем их все:
-        tokio::spawn(connect_handler(stream, addr, permit));
-    }
-
+                // Протокол http/2 позволяет отправлять много html запросов. Наверное лучше обработаем их все:
+                tokio::spawn(connect_handler(stream, addr, permit));
+            },
+            _ = shutdown_signal() => {
+                todo!();
+            },
+        };
     //Ok(())
 }
 
@@ -79,4 +84,10 @@ async fn connect_handler(
 
     // Освободим разрешение от семафора:
     drop(semaphore_permit)
+}
+
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c()
+        .await
+        .expect("Ошибка инициализации обработчика CTRL+C сигнала!");
 }
