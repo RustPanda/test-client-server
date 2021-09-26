@@ -22,9 +22,6 @@ tokio = { version = "1.12", features = ["rt-multi-thread", "net", "signal", "mac
 # позволит почень просто реалезовать http/2 multiplexing:
 h2 = {version = "0.3.4"}
 
-# Для работы с Error добавим crate anyhow:
-anyhow = "1.0"
-
 # Нам надо как-то отпарвлять ответ клиенту, для этого в crate h2 используется:
 http = "*"
 

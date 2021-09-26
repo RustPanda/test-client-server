@@ -60,9 +60,9 @@ pub async fn run(opt: ServerOpt) {
                     println!("\nАктивнх соединений: {}\nOстановка сервера...", opt.connect_limmit - semaphore.available_permits());
                 }
 
-                // Ожидаю 10 секунд завершения работы всез обработчиков соединений:
+                // Ожидаю 5 секунд завершения работы всез обработчиков соединений:
                 tokio::select! {
-                    _ = time::sleep(Duration::from_secs(10)) => {
+                    _ = time::sleep(Duration::from_secs(5)) => {
                         println!("Время ожидания грациозного завершения сервера истекло!\n\n\n\n\n");
                         println!("Число клиентов, недождавшихся ответа: {}", opt.connect_limmit - semaphore.available_permits());
                         break;
@@ -105,6 +105,8 @@ async fn connect_handler(
 
     println!("Новое подключение: {}", addr.to_string());
 
+    let semaphore_permit = Arc::new(semaphore_permit);
+
     // Я не понял задание про время. Я могу ограничить время обработки запроса на рандомное время,
     // или имитировать работу worker. Ниже я сделал второе, не уверен что оптимально реализую первый вариант
 
@@ -121,6 +123,8 @@ async fn connect_handler(
                 h2.graceful_shutdown();
             }
 
+            let clone_semaphore_permit = semaphore_permit.clone();
+
             // Каждый запрос обработаем отдельно. Такой подход значительно производительней:
             tokio::spawn(async move {
                 // Обработка запросто происходит не мгоновенно, за это время клиент может потерять соединение.
@@ -128,13 +132,13 @@ async fn connect_handler(
                 let err = async {
                     // Здесь обрабатываем поступившие запросы от клиента:
                     // Остановим обработку запроса на рандомное время 100-500 мс:
-                    println!(
-                        "Получeн запрос: {} {} от {}. Сон: {}",
-                        request.method(),
-                        request.uri(),
-                        addr.to_string(),
-                        time.as_millis()
-                    );
+                    // println!(
+                    //     "Получeн запрос: {} {} от {}. Сон: {}",
+                    //     request.method(),
+                    //     request.uri(),
+                    //     addr.to_string(),
+                    //     time.as_millis()
+                    // );
                     time::sleep(time).await;
 
                     // Ответим серверу что все Ok:
@@ -147,19 +151,21 @@ async fn connect_handler(
 
                 // Выведем ошибку в терминал:
                 if let Err(err) = err {
-                    eprintln!(
-                        "Ошибка обработки запроса клиента: {} {}",
-                        err,
-                        &addr.to_string()
-                    );
+                    // eprintln!(
+                    //     "Ошибка обработки запроса клиента: {} {}",
+                    //     err,
+                    //     &addr.to_string()
+                    // );
                 }
+                drop(clone_semaphore_permit);
             });
         } else {
             eprintln!("Ошибка соединения с клиентом: {}", &addr.to_string());
+            break;
         }
     }
 
-    println!("\n\nHappi end");
+    println!("Клиент отключился: {}", &addr.to_string());
     // Освободим разрешение от семафора:
     drop(semaphore_permit);
 }
