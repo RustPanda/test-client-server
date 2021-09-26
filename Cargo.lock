@@ -420,6 +420,7 @@ name = "test-client-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "h2",
  "http",
  "rand",

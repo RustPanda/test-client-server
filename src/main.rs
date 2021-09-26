@@ -3,7 +3,7 @@ mod client;
 mod server;
 
 // Объявим crates, которые я буду использовать в этом тэстовом приложении:
-use {anyhow::Result, structopt::StructOpt};
+use structopt::StructOpt;
 
 // Определим структуру с trait StructOpt, она поможет нам понять с какой ролью мы запустили наше приложение:
 #[derive(Debug, StructOpt)]
@@ -15,9 +15,9 @@ enum Opt {
 
 // Оприделим функцию main с использованиям макроса #[toki::main], main добжна быть async:
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     match Opt::from_args() {
         Opt::Server(opt) => server::run(opt).await,
         Opt::Client(opt) => client::run(opt).await,
-    }
+    };
 }
