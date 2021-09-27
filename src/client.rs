@@ -9,7 +9,7 @@ use tokio::{
 // Экспортируем StructOpt в server модуль, без него не сможем определить ServerOpt:
 use crate::StructOpt;
 
-// Собственно наш ClientOpt. Мы можем добовлять необходимые нам аргументы не затрагивая main код:
+// Собственно наш ClientOpt. Мы можем добавлять необходимые нам аргументы не затрагивая main код:
 #[derive(Debug, StructOpt, Clone, Copy)]
 pub struct ClientOpt {
     #[structopt(short, long, help = "Адрес сервера, к которому отправляем запросы.")]
@@ -17,7 +17,7 @@ pub struct ClientOpt {
     #[structopt(
         short,
         long,
-        help = "Количество паралельных запросов. Диапазон от 1 до 100!"
+        help = "Количество параллельных запросов. Диапазон от 1 до 100!"
     )]
     number: u32,
     #[structopt(short, long, help = "Отключить лимит для number")]
@@ -26,10 +26,10 @@ pub struct ClientOpt {
 
 // Весь код, связанный с запуском клиента, пишем тут:
 pub async fn run(opt: ClientOpt) {
-    // Проверим правильный ли диапозон нам передали. Есить возможность реалезовать это нативно в structopt,
+    // Проверим правильный ли диапазон нам передали. Есть возможность реализовать это нативно в structopt,
     // но делать я это конечно же не буду:
     if (opt.number < 1 || opt.number > 100) && !opt.anlimited {
-        eprintln!("Неверный диапарзон значений для n!");
+        eprintln!("Неверный диапазон значений для n!");
         eprintln!("Для получения подробностей выполните команду:  test-client-server client -h");
         return;
     }

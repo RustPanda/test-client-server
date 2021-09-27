@@ -14,7 +14,7 @@ use tokio::{
     sync::{broadcast, OwnedSemaphorePermit, Semaphore},
     time::{self},
 };
-// Собственно наш ServerOpt. Мы можем добовлять необходимые нам аргументы не затрагивая main код:
+// Собственно наш ServerOpt. Мы можем добавлять необходимые нам аргументы не затрагивая main код:
 #[derive(Debug, StructOpt)]
 pub struct ServerOpt {
     #[structopt(short, long)]
@@ -25,23 +25,23 @@ pub struct ServerOpt {
 
 // Весь код, связанный с запуском сервера, пишем тут:
 pub async fn run(opt: ServerOpt) {
-    // Для начаоа откроем socket, адрес и порт возмем из ServerOpt:
+    // Для начала откроем socket, адрес и порт возьмем из ServerOpt:
     let listener = TcpListener::bind(opt.bind_addr).await.unwrap();
 
-    // Для ограничения максимального подключения будем исполльзовать Semaphore. При каждом
+    // Для ограничения максимального подключения будем использовать Semaphore. При каждом
     // подключении клиента сервер "спрашивает разрешение"
     let semaphore = Arc::new(Semaphore::new(opt.connect_limmit));
 
-    // Нас как-то надо уведомлять уже запущщеные connect_handler's о завершении работы сервера,
+    // Нас как-то надо уведомлять уже запущены connect_handler's о завершении работы сервера,
     // для этого я решил использовать tokoo Notify. При получении сигнала обработчик отправит всем
-    // подписаным обработчикам соединений с клиентаи разрешение на завершение:
+    // подписанным обработчикам соединений с клиентам разрешение на завершение:
     let (sender_stop, _) = broadcast::channel::<()>(1);
 
     // Объявим вектор, в нем будем хранить join handle соединений клиентов
     let mut join_connect_statistics = Vec::<tokio::task::JoinHandle<Duration>>::with_capacity(100);
 
-    // Оъявим Option для хранения количества прерванных соединений:
-    let mut err_numer_connect = None;
+    // Объявим Option для хранения количества прерванных соединений:
+    let mut err_number_connect = None;
 
     loop {
         tokio::select! {
@@ -62,19 +62,14 @@ pub async fn run(opt: ServerOpt) {
             },
             // Получили сигнал, пора завершать работу сервера:
             _ = shutdown_signal() => {
-                // Отправляю всеи подписчикам на  broadcast channel разрешение на завершение своей работы:
-                if let Err(_) =  sender_stop.send(()) {
-                    println!("\nОстановка сервера...");
-                    break;
-                } else {
-                    println!("\nАктивнх соединений: {}\nOстановка сервера...", opt.connect_limmit - semaphore.available_permits());
-                }
+                // Отправляю всем подписчикам на  broadcast channel разрешение на завершение своей работы:
+                let _ = sender_stop.send(())
 
                 // Ожидаю 5 секунд завершения работы всез обработчиков соединений:
                 tokio::select! {
                     _ = time::sleep(Duration::from_secs(5)) => {
                         println!("Время ожидания завершения сервера истекло!");
-                        err_numer_connect = Some(opt.connect_limmit - semaphore.available_permits());
+                        err_number_connect = Some(opt.connect_limmit - semaphore.available_permits());
                         break;
                     }
                     // Пытаемся захватить все разрешения доступные нам, так мы будем уверенны что нет больше работуючих connect_handler:
@@ -87,13 +82,13 @@ pub async fn run(opt: ServerOpt) {
     }
 
     // Подготовим статистику и выведем ее в терминал.
-    // Вообще у меня повторяется код, можно было бы вынески в отдельный mod обработку и хранение статистики, но я уже подустал.
+    // Вообще у меня повторяется код, можно было бы вынести в отдельный mod обработку и хранение статистики, но я уже устал.
 
     // Посчитаем сколько запросов от клиента получили, это довольно легко:
     let connect_number = join_connect_statistics.len();
 
     if connect_number > 0 {
-        // У нас в join_request_statistics храняться только futures, надо из обработать:
+        // У нас в join_request_statistics хранятся только futures, надо из обработать:
         let mut connect_statistic = Vec::with_capacity(connect_number);
 
         for join in join_connect_statistics {
@@ -112,7 +107,7 @@ pub async fn run(opt: ServerOpt) {
 
         let average = sum / connect_number as u32;
 
-        let err_number_connect = if let Some(num) = err_numer_connect {
+        let err_number_connect = if let Some(num) = err_number_connect {
             format!("{}", num)
         } else {
             "None".to_string()
@@ -132,11 +127,11 @@ pub async fn run(opt: ServerOpt) {
         );
     }
 
-    println!("Сервет завершил работу!");
+    println!("Сервер завершил работу!");
     return;
 }
 
-// Вынес код по обработке входящщих соединений от клиентов:
+// Вынес код по обработке входящих соединений от клиентов:
 async fn connect_handler(
     stream: TcpStream,
     addr: SocketAddr,
@@ -161,7 +156,7 @@ async fn connect_handler(
     // Узнаем сколько времени мы обслуживали клиента:
     let service_time = Instant::now();
 
-    // Объявим вектор для зранения ресушьтата обработки запросов. Он хранит в себе время обработки и удачно ли прошла обработка:
+    // Объявим вектор для хранения результата обработки запросов. Он хранит в себе время обработки и удачно ли прошла обработка:
     let mut join_request_statistics = Vec::with_capacity(100);
 
     // Я не понял задание про время. Я могу ограничить время обработки запроса на рандомное время,
