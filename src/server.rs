@@ -63,7 +63,7 @@ pub async fn run(opt: ServerOpt) {
             // Получили сигнал, пора завершать работу сервера:
             _ = shutdown_signal() => {
                 // Отправляю всем подписчикам на  broadcast channel разрешение на завершение своей работы:
-                let _ = sender_stop.send(())
+                let _ = sender_stop.send(());
 
                 // Ожидаю 5 секунд завершения работы всез обработчиков соединений:
                 tokio::select! {
