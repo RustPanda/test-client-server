@@ -6,7 +6,6 @@ use http::{Response, StatusCode};
 use rand::prelude::*;
 use std::{
     net::SocketAddr,
-    process::exit,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -38,6 +37,12 @@ pub async fn run(opt: ServerOpt) {
     // подписаным обработчикам соединений с клиентаи разрешение на завершение:
     let (sender_stop, _) = broadcast::channel::<()>(1);
 
+    // Объявим вектор, в нем будем хранить join handle соединений клиентов
+    let mut join_connect_statistics = Vec::<tokio::task::JoinHandle<Duration>>::with_capacity(100);
+
+    // Оъявим Option для хранения количества прерванных соединений:
+    let mut err_numer_connect = None;
+
     loop {
         tokio::select! {
             // Обрабатываем новое подключение клиента:
@@ -52,7 +57,8 @@ pub async fn run(opt: ServerOpt) {
                 let stop = sender_stop.subscribe();
 
                 // К нам может придти несколько клиентов по отдельности, будем обробатовать каждый асинхронно:
-                tokio::spawn(connect_handler(stream, addr, permit, stop));
+                let join = tokio::spawn(connect_handler(stream, addr, permit, stop));
+                join_connect_statistics.push(join);
             },
             // Получили сигнал, пора завершать работу сервера:
             _ = shutdown_signal() => {
@@ -68,29 +74,66 @@ pub async fn run(opt: ServerOpt) {
                 tokio::select! {
                     _ = time::sleep(Duration::from_secs(5)) => {
                         println!("Время ожидания завершения сервера истекло!");
-                        println!("Число клиентов, недождавшихся ответа: {}", opt.connect_limmit - semaphore.available_permits());
+                        err_numer_connect = Some(opt.connect_limmit - semaphore.available_permits());
                         break;
                     }
                     // Пытаемся захватить все разрешения доступные нам, так мы будем уверенны что нет больше работуючих connect_handler:
-                    res = semaphore.clone().acquire_many_owned(opt.connect_limmit as u32) => {
-                        match res {
-                            Ok(_) => {
-                                println!("Все соединения с клиентами завершены!");
-                                break
-                            },
-                            Err(err) => {
-                                eprintln!("Не удалось завершить соединения с клиентами. \nError: {}", err);
-                                break
-                            },
-                        }
+                    _ = semaphore.clone().acquire_many_owned(opt.connect_limmit as u32) => {
+                        break;
                     }
                 }
             },
         }
     }
 
+    // Подготовим статистику и выведем ее в терминал.
+    // Вообще у меня повторяется код, можно было бы вынески в отдельный mod обработку и хранение статистики, но я уже подустал.
+
+    // Посчитаем сколько запросов от клиента получили, это довольно легко:
+    let connect_number = join_connect_statistics.len();
+
+    if connect_number > 0 {
+        // У нас в join_request_statistics храняться только futures, надо из обработать:
+        let mut connect_statistic = Vec::with_capacity(connect_number);
+
+        for join in join_connect_statistics {
+            connect_statistic.push(join.await.unwrap())
+        }
+
+        // Копипастить не хорошо, но Junior - мне можно:
+        // Посчитаем минимальное время ответа:
+        let min = connect_statistic.iter().min().unwrap_or(&Duration::ZERO);
+
+        // Максимальное время ответа:
+        let max = connect_statistic.iter().max().unwrap_or(&Duration::ZERO);
+
+        // Среднее арифметическое время ответа, можно было бы посчитать еще медиану:
+        let sum: Duration = connect_statistic.iter().sum();
+
+        let average = sum / connect_number as u32;
+
+        let err_number_connect = if let Some(num) = err_numer_connect {
+            format!("{}", num)
+        } else {
+            "None".to_string()
+        };
+
+        println!(
+            "    Обработано подключений:     {}
+    Прервано подключений:       {}
+    Минимальное время ответа:   {} мс
+    Максимальное время ответа:  {} мс
+    Среднее время ответа:       {} мс\n",
+            connect_number,
+            err_number_connect,
+            min.as_millis(),
+            max.as_millis(),
+            average.as_millis()
+        );
+    }
+
     println!("Сервет завершил работу!");
-    exit(0);
+    return;
 }
 
 // Вынес код по обработке входящщих соединений от клиентов:
@@ -99,7 +142,7 @@ async fn connect_handler(
     addr: SocketAddr,
     semaphore_permit: OwnedSemaphorePermit,
     mut stop_signal: broadcast::Receiver<()>,
-) {
+) -> Duration {
     // Здесь происходит магия crate h2. Клиент и сервер пожимают руку:
     let mut h2: Connection<TcpStream, Bytes> =
         server::Builder::new().handshake(stream).await.unwrap();
@@ -107,17 +150,18 @@ async fn connect_handler(
     // Создаем генератор псевдослучайных чисел:
     let mut rng: StdRng = SeedableRng::from_entropy();
 
-    println!("Новое подключение:              {}", addr.to_string());
+    println!("Новое подключение:              {}\n", addr.to_string());
 
     // Для сбора статистики у меня есть два варианта:
     //  1 При tokio::spawn записывать все JoinHandle в Vec или FuturesOrdered/FuturesUnrdered. При отключении клиента или завершении работы сервера пройтись по всем
     //    JoinHandle, получить из кдждого нуждую статистику переданную из connect_handler
     //  2 Объявить обернутый в Arc<Mutex<_>> объект, по завершении каждой connect_handler Future писать в него свою статистику.
 
-    // Я не буду создавать объявлять отдельную структуру под статистику, у меня и так вышел спагетти код, который хочется переписать. Я создам несколько:
+    // Я не буду объявлять отдельную структуру под статистику, у меня и так вышел спагетти код, который хочется переписать. Я создам несколько:
     // Узнаем сколько времени мы обслуживали клиента:
     let service_time = Instant::now();
 
+    // Объявим вектор для зранения ресушьтата обработки запросов. Он хранит в себе время обработки и удачно ли прошла обработка:
     let mut join_request_statistics = Vec::with_capacity(100);
 
     // Я не понял задание про время. Я могу ограничить время обработки запроса на рандомное время,
@@ -173,7 +217,9 @@ async fn connect_handler(
         }
     }
 
-    // В этом блоке я буду высчитывать и выводить статистику:
+    let service_time = service_time.elapsed();
+
+    // В этом блоке я буду высчитывать и выводить статистику
     {
         // Посчитаем сколько запросов от клиента получили, это довольно легко:
         let requests_number = join_request_statistics.len();
@@ -188,24 +234,24 @@ async fn connect_handler(
         // Посчитаем минимальное время ответа:
         let min = request_statistic
             .iter()
-            .filter(|(_time, err)| *err)
-            .map(|(time, _err)| time)
+            //.filter(|(_time, err)| *err)
+            .map(|(time, _ok)| time)
             .min()
             .unwrap_or(&Duration::ZERO);
 
         // Максимальное время ответа:
         let max = request_statistic
             .iter()
-            .filter(|(_time, err)| *err)
-            .map(|(time, _err)| time)
+            //.filter(|(_time, err)| *err)
+            .map(|(time, _ok)| time)
             .max()
             .unwrap_or(&Duration::ZERO);
 
         // Среднее арифметическое время ответа, можно было бы посчитать еще медиану:
         let sum: Duration = request_statistic
             .iter()
-            .filter(|(_time, err)| *err)
-            .map(|(time, _err)| time)
+            //.filter(|(_time, err)| *err)
+            .map(|(time, _ok)| time)
             .sum();
 
         let average = sum / requests_number as u32;
@@ -213,22 +259,27 @@ async fn connect_handler(
         // Выведем это все на терминал. Не очень изящьно, но работает:
         println!(
             "Клиент отключился:              {}
-    Общее время сианса:         {} мс
+    Общее время сeанса:         {} мс
     Поступило запросов:         {} 
     Минимальное время ответа:   {} мс
     Максимальное время ответа:  {} мс
-    Среднее время ответа:       {} мс",
+    Среднее время ответа:       {} мс
+    Общее время ответав:                {} мс\n",
             &addr.to_string(),
-            service_time.elapsed().as_millis(),
+            service_time.as_millis(),
             requests_number,
             min.as_millis(),
             max.as_millis(),
-            average.as_millis()
+            average.as_millis(),
+            sum.as_millis()
         );
     }
 
     // Явно освобождаю разрешение от семафоар:
     drop(semaphore_permit);
+
+    // Вернем общее время обслуживания клиента
+    service_time
 }
 
 // Небольшая обертка:

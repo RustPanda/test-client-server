@@ -1,7 +1,10 @@
 use h2::client;
 use http::Request;
 use std::{net::SocketAddr, time::Duration};
-use tokio::{net::TcpStream, time};
+use tokio::{
+    net::TcpStream,
+    time::{self, Instant},
+};
 
 // Экспортируем StructOpt в server модуль, без него не сможем определить ServerOpt:
 use crate::StructOpt;
@@ -18,14 +21,14 @@ pub struct ClientOpt {
     )]
     number: u32,
     #[structopt(short, long, help = "Отключить лимит для number")]
-    anlimit: bool,
+    anlimited: bool,
 }
 
 // Весь код, связанный с запуском клиента, пишем тут:
 pub async fn run(opt: ClientOpt) {
     // Проверим правильный ли диапозон нам передали. Есить возможность реалезовать это нативно в structopt,
     // но делать я это конечно же не буду:
-    if opt.number < 1 || opt.number > 100 {
+    if (opt.number < 1 || opt.number > 100) && !opt.anlimited {
         eprintln!("Неверный диапарзон значений для n!");
         eprintln!("Для получения подробностей выполните команду:  test-client-server client -h");
         return;
@@ -49,6 +52,9 @@ pub async fn run(opt: ClientOpt) {
 }
 
 async fn handler(tcp: TcpStream, opt: ClientOpt) {
+    // Время работы клиента:
+    let client_working_time = Instant::now();
+
     let (sender, h2) = client::handshake(tcp).await.unwrap();
 
     // Магия crate h2:
@@ -59,7 +65,7 @@ async fn handler(tcp: TcpStream, opt: ClientOpt) {
     });
 
     // Я упакую отправленные запросы в вектор:
-    let mut tasks = Vec::with_capacity(opt.number as usize);
+    let mut join_client_response_statistics = Vec::with_capacity(opt.number as usize);
 
     // Создаеи новые h2 соединения с сервером и отправляем запросы:
     for i in 0..opt.number {
@@ -73,6 +79,7 @@ async fn handler(tcp: TcpStream, opt: ClientOpt) {
 
         // Отправляем запрос:
         if let Ok((response, _)) = clone_sendr.send_request(request, true) {
+            let time = Instant::now();
             // Каждый запрос и обработка ответа асинхронны:
             let join = tokio::spawn(async move {
                 let res = async {
@@ -84,22 +91,75 @@ async fn handler(tcp: TcpStream, opt: ClientOpt) {
                 }
                 .await;
 
-                if let Err(err) = res {
-                    eprintln!("Ошибка получения ответа: {}", err);
-                };
+                (time.elapsed(), res.is_ok())
             });
 
-            tasks.push(join);
+            join_client_response_statistics.push(join);
         } else {
             eprintln!("Ошибка отправки запроса серверу!");
             break;
         };
     }
 
-    // Ждем получения ответов на все запросы:
-    for join in tasks {
-        join.await.unwrap();
+    // Длинный блок кода, отвечающий ожидание завершения обработки ответов и вывод статистики. Он частично скопирован с кода сервера, это не хорошо, но оно работает.
+    {
+        let mut client_response_statistics = Vec::with_capacity(opt.number as usize);
+
+        // Ждем получения ответов на все запросы:
+        for join in join_client_response_statistics {
+            let time = join.await.unwrap();
+            client_response_statistics.push(time);
+        }
+        let responce_number = client_response_statistics.len();
+
+        // Обрабатываем статистику:
+        let goot_req = client_response_statistics
+            .iter()
+            .filter(|(_time, ok)| *ok)
+            .count();
+
+        // Посчитаем минимальное время ответа:
+        let min = client_response_statistics
+            .iter()
+            //.filter(|(_time, err)| *err)
+            .map(|(time, _ok)| time)
+            .min()
+            .unwrap_or(&Duration::ZERO);
+
+        // Максимальное время ответа:
+        let max = client_response_statistics
+            .iter()
+            //.filter(|(_time, err)| *err)
+            .map(|(time, _ok)| time)
+            .max()
+            .unwrap_or(&Duration::ZERO);
+
+        // Среднее арифметическое время ответа, можно было бы посчитать еще медиану:
+        let sum: Duration = client_response_statistics
+            .iter()
+            //.filter(|(_time, err)| *err)
+            .map(|(time, _ok)| time)
+            .sum();
+
+        let average = sum / responce_number as u32;
+
+        println!(
+            "Работа клиента завершена!
+    Отправлено сообщений:               {}
+    Количество сообщений с ответами:    {}
+    Время сеанса клиента с сервером:    {} мс
+    Минимальное время ответа:           {} мс
+    Максимальное время ответа:          {} мс
+    Среднее время ответа:               {} мс
+    Общее время ответа всех запросов:   {} мс
+    ",
+            responce_number,
+            goot_req,
+            client_working_time.elapsed().as_millis(),
+            min.as_millis(),
+            max.as_millis(),
+            average.as_millis(),
+            sum.as_millis()
+        )
     }
 }
-
-// Для ведения статистири я объявлу struct. В ней я беде хранить время
