@@ -4,13 +4,17 @@ use bytes::Bytes;
 use h2::{server, server::Connection};
 use http::{Response, StatusCode};
 use rand::prelude::*;
-use std::{net::SocketAddr, process::exit, sync::Arc, time::Duration};
+use std::{
+    net::SocketAddr,
+    process::exit,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{broadcast, OwnedSemaphorePermit, Semaphore},
-    time,
+    time::{self},
 };
-
 // Собственно наш ServerOpt. Мы можем добовлять необходимые нам аргументы не затрагивая main код:
 #[derive(Debug, StructOpt)]
 pub struct ServerOpt {
@@ -63,7 +67,7 @@ pub async fn run(opt: ServerOpt) {
                 // Ожидаю 5 секунд завершения работы всез обработчиков соединений:
                 tokio::select! {
                     _ = time::sleep(Duration::from_secs(5)) => {
-                        println!("Время ожидания грациозного завершения сервера истекло!\n\n\n\n\n");
+                        println!("Время ожидания завершения сервера истекло!");
                         println!("Число клиентов, недождавшихся ответа: {}", opt.connect_limmit - semaphore.available_permits());
                         break;
                     }
@@ -103,9 +107,18 @@ async fn connect_handler(
     // Создаем генератор псевдослучайных чисел:
     let mut rng: StdRng = SeedableRng::from_entropy();
 
-    println!("Новое подключение: {}", addr.to_string());
+    println!("Новое подключение:              {}", addr.to_string());
 
-    let semaphore_permit = Arc::new(semaphore_permit);
+    // Для сбора статистики у меня есть два варианта:
+    //  1 При tokio::spawn записывать все JoinHandle в Vec или FuturesOrdered/FuturesUnrdered. При отключении клиента или завершении работы сервера пройтись по всем
+    //    JoinHandle, получить из кдждого нуждую статистику переданную из connect_handler
+    //  2 Объявить обернутый в Arc<Mutex<_>> объект, по завершении каждой connect_handler Future писать в него свою статистику.
+
+    // Я не буду создавать объявлять отдельную структуру под статистику, у меня и так вышел спагетти код, который хочется переписать. Я создам несколько:
+    // Узнаем сколько времени мы обслуживали клиента:
+    let service_time = Instant::now();
+
+    let mut join_request_statistics = Vec::with_capacity(100);
 
     // Я не понял задание про время. Я могу ограничить время обработки запроса на рандомное время,
     // или имитировать работу worker. Ниже я сделал второе, не уверен что оптимально реализую первый вариант
@@ -114,8 +127,10 @@ async fn connect_handler(
     while let Some(request) = h2.accept().await {
         // Клиент может неожиданно отключиться от сервера, необходимо это обработать
         // Я не стану отлавливать причину:
-        if let Ok((request, mut respond)) = request {
+        if let Ok((_request, mut respond)) = request {
             let time = Duration::from_millis(rng.gen_range(100..=500));
+
+            let service_time = Instant::now();
 
             // Правильно завершить работу сервера поможет:
             if let Ok(_) = stop_signal.try_recv() {
@@ -123,10 +138,8 @@ async fn connect_handler(
                 h2.graceful_shutdown();
             }
 
-            let clone_semaphore_permit = semaphore_permit.clone();
-
             // Каждый запрос обработаем отдельно. Такой подход значительно производительней:
-            tokio::spawn(async move {
+            let join_handle = tokio::spawn(async move {
                 // Обработка запросто происходит не мгоновенно, за это время клиент может потерять соединение.
                 // Отломим все ошибки и обработаем их:
                 let err = async {
@@ -145,28 +158,76 @@ async fn connect_handler(
                     let response = Response::builder().status(StatusCode::OK).body(()).unwrap();
 
                     let _ = respond.send_response(response, true)?;
-                    std::result::Result::<(), Box<dyn std::error::Error>>::Ok(())
+                    std::result::Result::<(), h2::Error>::Ok(())
                 }
                 .await;
 
-                // Выведем ошибку в терминал:
-                if let Err(err) = err {
-                    // eprintln!(
-                    //     "Ошибка обработки запроса клиента: {} {}",
-                    //     err,
-                    //     &addr.to_string()
-                    // );
-                }
-                drop(clone_semaphore_permit);
+                // Возвращаем сатистику:
+                (service_time.elapsed(), err.is_ok())
             });
+
+            join_request_statistics.push(join_handle);
         } else {
             eprintln!("Ошибка соединения с клиентом: {}", &addr.to_string());
             break;
         }
     }
 
-    println!("Клиент отключился: {}", &addr.to_string());
-    // Освободим разрешение от семафора:
+    // В этом блоке я буду высчитывать и выводить статистику:
+    {
+        // Посчитаем сколько запросов от клиента получили, это довольно легко:
+        let requests_number = join_request_statistics.len();
+
+        // У нас в join_request_statistics храняться только futures, надо из обработать:
+        let mut request_statistic = Vec::with_capacity(requests_number);
+
+        for join in join_request_statistics {
+            request_statistic.push(join.await.unwrap())
+        }
+
+        // Посчитаем минимальное время ответа:
+        let min = request_statistic
+            .iter()
+            .filter(|(_time, err)| *err)
+            .map(|(time, _err)| time)
+            .min()
+            .unwrap_or(&Duration::ZERO);
+
+        // Максимальное время ответа:
+        let max = request_statistic
+            .iter()
+            .filter(|(_time, err)| *err)
+            .map(|(time, _err)| time)
+            .max()
+            .unwrap_or(&Duration::ZERO);
+
+        // Среднее арифметическое время ответа, можно было бы посчитать еще медиану:
+        let sum: Duration = request_statistic
+            .iter()
+            .filter(|(_time, err)| *err)
+            .map(|(time, _err)| time)
+            .sum();
+
+        let average = sum / requests_number as u32;
+
+        // Выведем это все на терминал. Не очень изящьно, но работает:
+        println!(
+            "Клиент отключился:              {}
+    Общее время сианса:         {} мс
+    Поступило запросов:         {} 
+    Минимальное время ответа:   {} мс
+    Максимальное время ответа:  {} мс
+    Среднее время ответа:       {} мс",
+            &addr.to_string(),
+            service_time.elapsed().as_millis(),
+            requests_number,
+            min.as_millis(),
+            max.as_millis(),
+            average.as_millis()
+        );
+    }
+
+    // Явно освобождаю разрешение от семафоар:
     drop(semaphore_permit);
 }
 

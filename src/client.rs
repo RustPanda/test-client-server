@@ -9,16 +9,29 @@ use crate::StructOpt;
 // Собственно наш ClientOpt. Мы можем добовлять необходимые нам аргументы не затрагивая main код:
 #[derive(Debug, StructOpt, Clone, Copy)]
 pub struct ClientOpt {
-    #[structopt(short, long)]
+    #[structopt(short, long, help = "Адрес сервера, к которому отправляем запросы.")]
     connect: SocketAddr,
-    #[structopt(short, long)]
-    n: u32,
+    #[structopt(
+        short,
+        long,
+        help = "Количество паралельных запросов. Диапазон от 1 до 100!"
+    )]
+    number: u32,
+    #[structopt(short, long, help = "Отключить лимит для number")]
+    anlimit: bool,
 }
 
 // Весь код, связанный с запуском клиента, пишем тут:
 pub async fn run(opt: ClientOpt) {
-    dbg!(opt);
+    // Проверим правильный ли диапозон нам передали. Есить возможность реалезовать это нативно в structopt,
+    // но делать я это конечно же не буду:
+    if opt.number < 1 || opt.number > 100 {
+        eprintln!("Неверный диапарзон значений для n!");
+        eprintln!("Для получения подробностей выполните команду:  test-client-server client -h");
+        return;
+    }
 
+    // Создаем пару futures. Первая для подключения е серверу, а вторая timeout:
     let stream = TcpStream::connect(opt.connect);
     let sleep = time::sleep(Duration::from_secs(2));
 
@@ -46,10 +59,10 @@ async fn handler(tcp: TcpStream, opt: ClientOpt) {
     });
 
     // Я упакую отправленные запросы в вектор:
-    let mut tasks = Vec::new();
+    let mut tasks = Vec::with_capacity(opt.number as usize);
 
     // Создаеи новые h2 соединения с сервером и отправляем запросы:
-    for i in 0..opt.n {
+    for i in 0..opt.number {
         let mut clone_sendr = sender.clone();
 
         //  Заголовок запроса:
@@ -64,20 +77,21 @@ async fn handler(tcp: TcpStream, opt: ClientOpt) {
             let join = tokio::spawn(async move {
                 let res = async {
                     // Дожидаемся ответа:
-                    let response = response.await?;
+                    let _response = response.await?;
 
-                    println!("№ {} {}", i, response.status());
+                    //println!("№ {} {}", i, response.status());
                     std::result::Result::<(), Box<dyn std::error::Error>>::Ok(())
                 }
                 .await;
 
                 if let Err(err) = res {
-                    eprintln!("Ошибка: {}", err);
+                    eprintln!("Ошибка получения ответа: {}", err);
                 };
             });
 
             tasks.push(join);
         } else {
+            eprintln!("Ошибка отправки запроса серверу!");
             break;
         };
     }
@@ -87,3 +101,5 @@ async fn handler(tcp: TcpStream, opt: ClientOpt) {
         join.await.unwrap();
     }
 }
+
+// Для ведения статистири я объявлу struct. В ней я беде хранить время
