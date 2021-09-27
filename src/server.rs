@@ -63,11 +63,13 @@ pub async fn run(opt: ServerOpt) {
             // Получили сигнал, пора завершать работу сервера:
             _ = shutdown_signal() => {
                 // Отправляю всем подписчикам на  broadcast channel разрешение на завершение своей работы:
-                let _ = sender_stop.send(());
+                if let Err(_) = sender_stop.send(()) {
+                    break;
+                }
 
-                // Ожидаю 5 секунд завершения работы всез обработчиков соединений:
+                // Ожидаю 10 секунд завершения работы всех обработчиков соединений:
                 tokio::select! {
-                    _ = time::sleep(Duration::from_secs(5)) => {
+                    _ = time::sleep(Duration::from_secs(10)) => {
                         println!("Время ожидания завершения сервера истекло!");
                         err_number_connect = Some(opt.connect_limmit - semaphore.available_permits());
                         break;
@@ -172,8 +174,8 @@ async fn connect_handler(
             let service_time = Instant::now();
 
             // Правильно завершить работу сервера поможет:
-            if let Ok(_) = stop_signal.try_recv() {
-                println!("Получен сигнал завершения работы! {}", &addr.to_string());
+            if let Ok(()) = stop_signal.try_recv() {
+                println!("\nПолучен сигнал завершения работы! {}", &addr.to_string());
                 h2.graceful_shutdown();
             }
 
@@ -259,7 +261,7 @@ async fn connect_handler(
     Минимальное время ответа:   {} мс
     Максимальное время ответа:  {} мс
     Среднее время ответа:       {} мс
-    Общее время ответав:                {} мс\n",
+    Общее время ответав:        {} мс\n",
             &addr.to_string(),
             service_time.as_millis(),
             requests_number,
